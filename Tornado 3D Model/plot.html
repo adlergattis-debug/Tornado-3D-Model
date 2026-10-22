@@ -1,0 +1,255 @@
+<!doctype html>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3D Trajectory Viewer</title>
+<style>
+:root{--line:#243040;--tx:#e6edf3;--mut:#8b9bb0;--acc:#38bdf8}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:radial-gradient(ellipse at 40% 30%,#16212e,#0b1118 70%);color:var(--tx);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;overflow:hidden}
+canvas{position:absolute;left:0;top:0;cursor:grab}
+#side{position:absolute;right:0;top:0;bottom:0;width:290px;background:rgba(18,26,36,.94);border-left:1px solid var(--line);padding:18px;overflow:auto}
+h1{font-size:15px;margin:0 0 2px;letter-spacing:.3px}
+.sub{color:var(--mut);font-size:12px}
+h2{font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:var(--mut);margin:18px 0 6px;font-weight:600}
+.row{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px solid #1b2634}
+.row span{color:var(--mut)}.row b{font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
+#bar{height:8px;border-radius:4px;margin:6px 0 4px;background:linear-gradient(90deg,#38bdf8,#facc15,#f43f5e)}
+.lg{display:flex;justify-content:space-between;color:var(--mut);font-size:11.5px}
+label{display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer}
+input[type=range]{width:100%;accent-color:var(--acc)}
+button{background:#1b2634;color:var(--tx);border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer;margin-top:8px}
+button:hover{border-color:var(--acc)}
+#tip{position:absolute;pointer-events:none;background:rgba(11,17,24,.95);border:1px solid #2d3e52;border-radius:8px;padding:8px 10px;display:none;line-height:1.6;white-space:nowrap}
+#tip i{color:var(--mut);font-style:normal;display:inline-block;width:64px}
+#msg{position:absolute;left:16px;bottom:14px;color:var(--mut);font-size:12px}
+#empty{position:absolute;left:0;top:0;bottom:0;right:290px;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--mut);pointer-events:none}
+table{width:100%;border-collapse:collapse;font-size:11.5px;font-variant-numeric:tabular-nums}
+th{position:sticky;top:0;background:#121a24;color:var(--mut);font-weight:600;text-align:right;padding:4px}
+td{text-align:right;padding:3px 4px;border-bottom:1px solid #1b2634}
+th:first-child,td:first-child{text-align:left}
+#tbl tr:hover td{background:#1b2634;cursor:default}#tbl tr.pk td{color:#facc15}
+#tblw{max-height:250px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+summary{cursor:pointer;color:var(--mut);font-size:12px}
+select{width:100%;background:#1b2634;color:var(--tx);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+#sc{position:static;display:block;cursor:default}
+#empty div{max-width:380px}#empty code{color:var(--acc);font-size:12px}
+</style>
+<canvas id="c"></canvas>
+<div id="empty"><div><div style="font-size:18px;color:#e6edf3;margin-bottom:8px">Waiting for data</div>Copy a JSON array and it plots here automatically.<br><br><code>[{"t":1,"lon":-83.48,"lat":42.43,"alt":100}, ...]</code></div></div>
+<div id="tip"></div><div id="msg">Waiting for data&hellip;</div>
+<div id="side">
+<h1>3D Trajectory Viewer</h1>
+<div class="sub">Time in seconds &middot; altitude in feet &middot; position in degrees</div>
+<h2>Summary</h2><div id="sum"></div>
+<h2 id="sh">Speed vs time</h2><select id="cs"><option value="speed">Speed</option><option value="rad">Distance from center</option><option value="alt">Altitude</option></select><canvas id="sc" style="margin-top:8px"></canvas>
+<h2>Speed between points</h2><div id="tblw"><table id="tbl"></table></div>
+<h2>Rotation about center</h2><div id="rot"></div>
+<h2>Start / End</h2><div id="se"></div>
+<details style="margin-top:10px"><summary>Decimal places &rarr; feet</summary><div id="dec" style="margin-top:6px"></div></details>
+<h2>Path color</h2><select id="cm"><option value="time">By time</option><option value="speed">By speed</option></select><div id="bar"></div><div class="lg"><span id="l0">&ndash;</span><span id="l1">&ndash;</span></div>
+<h2>View</h2>
+<div class="lg" style="margin-bottom:4px"><span>Speed units</span></div><select id="su"><option value="mph">mph</option><option value="fps">ft/s</option></select>
+<div class="lg" style="margin-top:10px"><span>Altitude exaggeration</span><span id="xv">1.0&times;</span></div>
+<input type="range" id="ex" min="0.2" max="30" step="0.1" value="1">
+<label><input type="checkbox" id="kg" checked> Grid</label>
+<label><input type="checkbox" id="kd" checked> Drop lines</label>
+<label><input type="checkbox" id="kt" checked> Ground track</label>
+<label><input type="checkbox" id="kc" checked> Tornado center</label>
+<label><input type="checkbox" id="kl" checked> Label speed between points (<span id="ku">mph</span>)</label>
+<label><input type="checkbox" id="kr"> Auto-rotate</label>
+<button id="rv">Reset view</button>
+<div class="sub" style="margin-top:14px">Drag to orbit &middot; scroll to zoom &middot; hover a point for details &middot; Up/Down arrows change exaggeration</div>
+<div class="sub" style="margin-top:8px">Speed class is an estimate from the object's speed. Official EF ratings come from damage surveys.</div>
+</div>
+<script>
+const $=id=>document.getElementById(id),cv=$('c'),g=cv.getContext('2d'),tip=$('tip');
+const FT=3.28084,PW=290,G=.6,FN='-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
+let pts=[],raw=null,info=null,yaw=.8,pitch=.45,zoom=1,exag=1,hover=-1,mx=0,my=0,W=0,H=0,dpr=1,drag=false,lx=0,ly=0;
+const stops=[[56,189,248],[250,204,21],[244,63,94]];
+const col=(f,a=1)=>{f=Math.max(0,Math.min(1,f));const k=f<.5?0:1,u=(f-k*.5)*2,A=stops[k],B=stops[k+1];return'rgba('+A.map((v,i)=>Math.round(v+(B[i]-v)*u)).join(',')+','+a+')'};
+const rmin=(a,k)=>a.reduce((m,o)=>Math.min(m,o[k]),Infinity),rmax=(a,k)=>a.reduce((m,o)=>Math.max(m,o[k]),-Infinity);
+const nice=x=>{const p=Math.pow(10,Math.floor(Math.log10(x))),m=x/p;return(m<1.5?1:m<3.5?2:m<7.5?5:10)*p};
+const fmt=v=>Math.abs(v)>=1000?Math.round(v).toLocaleString():String(Math.round(v*10)/10);
+const row=(k,v)=>'<div class="row"><span>'+k+'</span><b>'+v+'</b></div>';
+const fps=()=>$('su').value==='fps',S=v=>fps()?v:v*.681818,UL=()=>fps()?'ft/s':'mph';
+const ef=m=>m<65?'Below EF0 (<65 mph)':m<86?'EF0 (65\u201385 mph)':m<111?'EF1 (86\u2013110 mph)':m<136?'EF2 (111\u2013135 mph)':m<166?'EF3 (136\u2013165 mph)':m<201?'EF4 (166\u2013200 mph)':'EF5 (>200 mph)';
+const msg=t=>{$('msg').textContent=t};
+function resize(){dpr=devicePixelRatio||1;W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;cv.style.width=W+'px';cv.style.height=H+'px'}
+addEventListener('resize',resize);resize();
+
+function load(str){
+  try{
+    const j=JSON.parse(str),a=Array.isArray(j)?j:j.points;
+    const p=a.map((o,i)=>({t:+(o.t??i),lon:+o.lon,lat:+o.lat,alt:+o.alt}));
+    if(!p.length||p.some(q=>isNaN(q.t)||isNaN(q.lon)||isNaN(q.lat)||isNaN(q.alt)))throw'every point needs numeric lon, lat and alt';
+    p.sort((a,b)=>a.t-b.t);
+    const m0=Math.cos(p[0].lat*Math.PI/180)*111320*FT,m1=111132*FT;       // feet per degree
+    const q=p.map(o=>({e:(o.lon-p[0].lon)*m0,n:(o.lat-p[0].lat)*m1,u:o.alt}));
+    const E0=rmin(q,'e'),E1=rmax(q,'e'),N0=rmin(q,'n'),N1=rmax(q,'n'),U0=rmin(q,'u'),U1=rmax(q,'u');
+    const ext=Math.max(E1-E0,N1-N0,U1-U0,1),cE=(E0+E1)/2,cN=(N0+N1)/2,cU=(U0+U1)/2;
+    let L=0,ms=0,vs=0;const sp=[0],gs=[0],vz=[0],ds=[0],dts=[0];
+    for(let i=1;i<q.length;i++){
+      const dh=Math.hypot(q[i].e-q[i-1].e,q[i].n-q[i-1].n),dz=q[i].u-q[i-1].u,s=Math.hypot(dh,dz),dt=p[i].t-p[i-1].t;
+      L+=s;if(dt>0){ms=Math.max(ms,s/dt);vs=Math.max(vs,Math.abs(dz)/dt)}
+      ds.push(s);dts.push(dt);sp.push(dt>0?s/dt:sp[i-1]);gs.push(dt>0?dh/dt:gs[i-1]);vz.push(dt>0?dz/dt:vz[i-1]);
+    }
+    if(q.length>1){sp[0]=sp[1];gs[0]=gs[1];vz[0]=vz[1]}
+    const t0=p[0].t,t1=p[p.length-1].t,T=t1-t0;
+    // tornado center: given as {"center":{"lon":..,"lat":..}} or estimated as the average of the path
+    const gv=!Array.isArray(j)&&j.center&&isFinite(+j.center.lon)&&isFinite(+j.center.lat);
+    const cc=gv?{e:(+j.center.lon-p[0].lon)*m0,n:(+j.center.lat-p[0].lat)*m1}:{e:q.reduce((a,o)=>a+o.e,0)/q.length,n:q.reduce((a,o)=>a+o.n,0)/q.length};
+    const rad=q.map(o=>Math.hypot(o.e-cc.e,o.n-cc.n)),vt=[0],vr=[0];let th=0;
+    for(let i=1;i<q.length;i++){
+      let d=Math.atan2(q[i].n-cc.n,q[i].e-cc.e)-Math.atan2(q[i-1].n-cc.n,q[i-1].e-cc.e);
+      d=Math.atan2(Math.sin(d),Math.cos(d));th+=d;const dt=p[i].t-p[i-1].t;
+      vt.push(dt>0?(rad[i]+rad[i-1])/2*d/dt:vt[i-1]);vr.push(dt>0?(rad[i]-rad[i-1])/dt:vr[i-1]);
+    }
+    if(q.length>1){vt[0]=vt[1];vr[0]=vr[1]}
+    pts=q.map((o,i)=>({x:(o.e-cE)/ext,y:(o.u-cU)/ext,z:(o.n-cN)/ext}));
+    info={n:p.length,p:p,ext:ext,cE:cE,cN:cN,cU:cU,U0:U0,U1:U1,t0:t0,t1:t1,T:T,L:L,ms:ms,vs:vs,avg:T>0?L/T:0,ground:(U0-cU)/ext,sp:sp,gs:gs,vz:vz,smin:Math.min(...sp),smax:Math.max(...sp),ds:ds,dts:dts,m0:m0,m1:m1,rad:rad,vt:vt,vr:vr,th:th,r0:Math.min(...rad),r1:Math.max(...rad),cgiven:!!gv,cx:(cc.e-cE)/ext,cz:(cc.n-cN)/ext,clon:p[0].lon+cc.e/m0,clat:p[0].lat+cc.n/m1};
+    panel();msg('Updated '+new Date().toLocaleTimeString()+' \u00b7 '+p.length+' points');
+  }catch(e){msg('Could not read JSON: '+e)}
+}
+function panel(){
+  const I=info,a=I.p[0],b=I.p[I.n-1],pos=o=>o.lon.toFixed(8)+'\u00b0, '+o.lat.toFixed(8)+'\u00b0';
+  $('sum').innerHTML=row('Points',I.n)+row('Duration',fmt(I.T)+' s')+row('Path length',fmt(I.L)+' ft')+row('Average speed',fmt(S(I.avg))+' '+UL())+
+    row('Peak speed',fmt(S(I.ms))+' '+UL())+row('Peak speed class',ef(I.ms*.681818))+row('Peak vertical rate',fmt(S(I.vs))+' '+UL())+row('Altitude range',fmt(I.U0)+' \u2013 '+fmt(I.U1)+' ft');
+  $('se').innerHTML=row('Start',pos(a))+row('Start altitude',fmt(a.alt)+' ft')+row('End',pos(b))+row('End altitude',fmt(b.alt)+' ft');
+  const tn=Math.abs(I.th)/6.2832;
+  $('rot').innerHTML=row(I.cgiven?'Center':'Center (estimated)',I.clon.toFixed(8)+'\u00b0, '+I.clat.toFixed(8)+'\u00b0')+
+    row('Turns',fmt(tn)+(tn>.02?(I.th>=0?' counterclockwise':' clockwise'):''))+row('Time per turn',tn>.05?fmt(I.T/tn)+' s':'\u2013')+
+    row('Radius range',fmt(I.r0)+' \u2013 '+fmt(I.r1)+' ft');
+  const mxi=I.n>1?I.sp.indexOf(Math.max(...I.sp.slice(1)),1):-1,lim=Math.min(I.n,801);
+  let h='<tr><th>Seg</th><th>\u0394t (s)</th><th>Dist (ft)</th><th>'+UL()+'</th></tr>';
+  if(I.n<2)h+='<tr><td colspan="4">Need at least 2 points</td></tr>';
+  for(let i=1;i<lim;i++)h+='<tr data-i="'+i+'"'+(i===mxi?' class="pk"':'')+'><td>'+i+'&rarr;'+(i+1)+'</td><td>'+fmt(I.dts[i])+'</td><td>'+fmt(I.ds[i])+'</td><td>'+fmt(S(I.sp[i]))+'</td></tr>';
+  if(I.n>lim)h+='<tr><td colspan="4">&hellip; '+(I.n-lim)+' more segments not listed</td></tr>';
+  $('tbl').innerHTML=h;
+  const sf=v=>v>=10?Math.round(v).toLocaleString():v>=1?v.toFixed(2):v.toPrecision(2);
+  let dh='<table><tr><th>Decimals</th><th>Lat (ft)</th><th>Lon (ft)</th></tr>';
+  for(let d=1;d<=8;d++){const st=Math.pow(10,-d);dh+='<tr><td>'+d+'</td><td>'+sf(st*I.m1)+'</td><td>'+sf(st*I.m0)+'</td></tr>'}
+  $('dec').innerHTML=dh+'</table><div class="sub" style="margin-top:4px">Longitude feet are for latitude '+I.p[0].lat.toFixed(2)+'&deg;</div>';
+  legend();
+}
+function legend(){$('ku').textContent=UL();const I=info;if(!I)return;const k=$('cm').value==='speed';
+  $('l0').textContent=k?fmt(S(I.smin))+' '+UL():fmt(I.t0)+' s';$('l1').textContent=k?fmt(S(I.smax))+' '+UL():fmt(I.t1)+' s'}
+function poll(){
+  const s=document.createElement('script');s.src='data.js?'+Date.now();
+  s.onload=()=>{if(window.RAW!=null&&window.RAW!==raw){raw=window.RAW;load(raw)}s.remove()};
+  s.onerror=()=>s.remove();document.head.appendChild(s);
+}
+setInterval(poll,500);poll();
+
+const sc=$('sc'),g2=sc.getContext('2d'),EFL=[[65,'EF0'],[86,'EF1'],[111,'EF2'],[136,'EF3'],[166,'EF4'],[201,'EF5']];
+let shTxt='',rowHi=-1;
+function series(){
+  const k=$('cs').value,I=info;
+  if(k==='alt')return{v:I.p.map(o=>o.alt),lo:I.U0,hi:I.U1,t:'Altitude vs time (ft)',ef:0};
+  if(k==='rad')return{v:I.rad,lo:0,hi:I.r1,t:'Distance from center vs time (ft)',ef:0};
+  return{v:I.sp.map(S),lo:0,hi:S(I.smax),t:'Speed vs time ('+UL()+')',ef:1};
+}
+function chart(){
+  const w=254,h=110;
+  if(sc.width!==w*dpr){sc.width=w*dpr;sc.height=h*dpr;sc.style.width=w+'px';sc.style.height=h+'px'}
+  g2.setTransform(dpr,0,0,dpr,0,0);g2.clearRect(0,0,w,h);
+  if(!info)return;
+  const I=info,D=series(),L=40,R=4,T=8,B=16,pw=w-L-R,ph=h-T-B,ym=D.hi+((D.hi-D.lo)*.1||1);
+  if(shTxt!==D.t){shTxt=D.t;$('sh').textContent=D.t}
+  const X=i=>L+(I.T>0?(I.p[i].t-I.t0)/I.T:i/(I.n-1||1))*pw,Y=v=>T+ph-(v-D.lo)/(ym-D.lo)*ph;
+  g2.font='10px '+FN;g2.textBaseline='middle';g2.lineWidth=1;
+  [0,.5,1].forEach(f=>{const v=D.lo+(ym-D.lo)*f,y=Y(v);g2.strokeStyle='#243040';g2.beginPath();g2.moveTo(L,y);g2.lineTo(w-R,y);g2.stroke();
+    g2.fillStyle='#8b9bb0';g2.textAlign='right';g2.fillText(fmt(v),L-4,y)});
+  if(D.ef)EFL.forEach(([m,l])=>{const v=fps()?m*1.466667:m;if(v>D.lo&&v<ym){const y=Y(v);
+    g2.setLineDash([3,3]);g2.strokeStyle='rgba(250,204,21,.4)';g2.beginPath();g2.moveTo(L,y);g2.lineTo(w-R,y);g2.stroke();g2.setLineDash([]);
+    g2.fillStyle='rgba(250,204,21,.75)';g2.textAlign='right';g2.fillText(l,w-R-2,y-6)}});
+  g2.fillStyle='#8b9bb0';g2.textAlign='left';g2.fillText(fmt(I.t0)+' s',L,h-5);g2.textAlign='right';g2.fillText(fmt(I.t1)+' s',w-R,h-5);
+  g2.beginPath();D.v.forEach((v,i)=>i?g2.lineTo(X(i),Y(v)):g2.moveTo(X(i),Y(v)));
+  g2.strokeStyle='#38bdf8';g2.lineWidth=1.8;g2.lineJoin='round';g2.stroke();
+  g2.lineTo(X(I.n-1),Y(D.lo));g2.lineTo(X(0),Y(D.lo));g2.closePath();g2.fillStyle='rgba(56,189,248,.12)';g2.fill();
+  if(hover>=0){const x=X(hover);g2.strokeStyle='rgba(255,255,255,.5)';g2.lineWidth=1;g2.beginPath();g2.moveTo(x,T);g2.lineTo(x,T+ph);g2.stroke();
+    g2.beginPath();g2.arc(x,Y(D.v[hover]),3.5,0,7);g2.fillStyle='#fff';g2.fill()}
+}
+
+function draw(){
+  g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);g.textBaseline='middle';
+  $('empty').style.display=info?'none':'flex';
+  if($('kr').checked&&!drag)yaw+=.004;
+  hover=-1;
+  if(info){
+    const I=info,cx=(W-PW)/2,cy=H/2,K=Math.min(W-PW,H)*.6*zoom;
+    const c1=Math.cos(yaw),s1=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+    const P=(x,y,z)=>{const x1=x*c1+z*s1,z1=-x*s1+z*c1,y2=y*cp+z1*sp,z2=-y*sp+z1*cp,f=3/(3+z2);return{x:cx+x1*f*K,y:cy-y2*f*K,z:z2,f:f}};
+    const ln=(a,b)=>{g.beginPath();g.moveTo(a.x,a.y);g.lineTo(b.x,b.y);g.stroke()};
+    const tx=(s,p,al,c)=>{g.textAlign=al||'center';g.fillStyle=c||'#8b9bb0';g.fillText(s,p.x,p.y)};
+    const gy=I.ground*exag,step=nice(I.ext*2*G/8);
+    const e0=Math.ceil((I.cE-G*I.ext)/step),e1=Math.floor((I.cE+G*I.ext)/step),n0=Math.ceil((I.cN-G*I.ext)/step),n1=Math.floor((I.cN+G*I.ext)/step);
+    // ground plane + grid
+    g.beginPath();[[-G,-G],[G,-G],[G,G],[-G,G]].forEach(([x,z],i)=>{const p=P(x,gy,z);i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y)});
+    g.closePath();g.fillStyle='rgba(56,189,248,.045)';g.fill();g.strokeStyle='#2d3e52';g.lineWidth=1;g.stroke();
+    if($('kg').checked){g.strokeStyle='#1f2d3d';
+      for(let k=e0;k<=e1;k++){const x=(k*step-I.cE)/I.ext;ln(P(x,gy,-G),P(x,gy,G))}
+      for(let k=n0;k<=n1;k++){const z=(k*step-I.cN)/I.ext;ln(P(-G,gy,z),P(G,gy,z))}}
+    // axis labels on the edges nearest the camera
+    g.font='11px '+FN;
+    const zs=P(0,gy,-G).z<P(0,gy,G).z?-1:1,xs=P(-G,gy,0).z<P(G,gy,0).z?-1:1;
+    for(let k=e0;k<=e1;k++)tx(fmt(k*step),P((k*step-I.cE)/I.ext,gy,zs*(G+.05)));
+    for(let k=n0;k<=n1;k++)tx(fmt(k*step),P(xs*(G+.07),gy,(k*step-I.cN)/I.ext));
+    g.font='600 10.5px '+FN;
+    tx('EAST (ft)',P(0,gy,zs*(G+.12)),'center','#c0ccda');tx('NORTH (ft)',P(xs*(G+.17),gy,0),'center','#c0ccda');
+    // altitude axis on the left-most corner
+    const cs=[[-G,-G],[-G,G],[G,-G],[G,G]].map(([x,z])=>({x:x,z:z,p:P(x,gy,z)})).sort((a,b)=>a.p.x-b.p.x)[0];
+    const yt=a=>(a-I.cU)/I.ext*exag,as=nice(Math.max(I.U1-I.U0,1)/5);
+    g.strokeStyle='#5b7088';g.lineWidth=1.2;ln(P(cs.x,gy,cs.z),P(cs.x,yt(I.U1),cs.z));
+    g.font='11px '+FN;
+    for(let a=Math.ceil(I.U0/as)*as;a<=I.U1+1e-9;a+=as){const p=P(cs.x,yt(a),cs.z);ln(p,{x:p.x-5,y:p.y});tx(fmt(a),{x:p.x-9,y:p.y},'right')}
+    g.font='600 10.5px '+FN;tx('ALTITUDE (ft)',P(cs.x,yt(I.U1)+.06,cs.z),'center','#c0ccda');
+    if($('kc').checked){
+      const a=P(I.cx,gy,I.cz),b=P(I.cx,yt(I.U1),I.cz);
+      g.setLineDash([5,4]);g.strokeStyle='rgba(56,189,248,.55)';g.lineWidth=1.2;ln(a,b);g.setLineDash([]);
+      g.beginPath();g.arc(a.x,a.y,3,0,7);g.fillStyle='#38bdf8';g.fill();
+      g.font='600 10.5px '+FN;tx('CENTER',{x:b.x,y:b.y-10},'center','#7dd3fc');
+    }
+    // data
+    const pp=pts.map(p=>P(p.x,p.y*exag,p.z));
+    const sm=$('cm').value==='speed',nv=i=>sm?(I.sp[i]-I.smin)/((I.smax-I.smin)||1):(pp.length>1?i/(pp.length-1):0);
+    if($('kt').checked){g.strokeStyle='rgba(255,255,255,.22)';g.lineWidth=1.5;g.beginPath();pts.forEach((p,i)=>{const q=P(p.x,gy,p.z);i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y)});g.stroke()}
+    if($('kd').checked){g.strokeStyle='rgba(255,255,255,.1)';g.lineWidth=1;pts.forEach((p,i)=>ln(pp[i],P(p.x,gy,p.z)))}
+    g.lineWidth=2.6;g.lineCap='round';
+    for(let i=1;i<pp.length;i++){g.strokeStyle=col(sm?nv(i):(i-.5)/(pp.length-1));ln(pp[i-1],pp[i])}
+    if(rowHi>0&&rowHi<pp.length){g.strokeStyle='#fff';g.lineWidth=5;ln(pp[rowHi-1],pp[rowHi]);g.lineWidth=2.6}
+    let best=14;if(mx<W-PW&&!drag)pp.forEach((p,i)=>{const d=Math.hypot(p.x-mx,p.y-my);if(d<best){best=d;hover=i}});
+    pp.map((p,i)=>i).sort((a,b)=>pp[b].z-pp[a].z).forEach(i=>{
+      const p=pp[i],h=i===hover,r=(h?6:3)+2*p.f;
+      g.beginPath();g.arc(p.x,p.y,r,0,7);g.fillStyle=col(nv(i));g.fill();
+      g.lineWidth=h?2:1.2;g.strokeStyle=h?'#fff':'rgba(11,17,24,.9)';g.stroke()});
+    if($('kl').checked){
+      g.font='600 10.5px '+FN;g.textAlign='center';g.lineJoin='round';g.lineWidth=3;
+      const nth=Math.ceil(pp.length/60);                 // thin out labels on very long tracks
+      pp.forEach((p,i)=>{if(i<1||i%nth)return;const q=pp[i-1],xm=(p.x+q.x)/2,ym2=(p.y+q.y)/2-9,t=fmt(S(I.sp[i]));
+        g.strokeStyle='rgba(11,17,24,.85)';g.strokeText(t,xm,ym2);g.fillStyle='#e6edf3';g.fillText(t,xm,ym2)});
+    }
+    g.font='600 10.5px '+FN;
+    tx('START',{x:pp[0].x,y:pp[0].y-15},'center','#e6edf3');
+    if(pp.length>1)tx('END',{x:pp[pp.length-1].x,y:pp[pp.length-1].y-15},'center','#e6edf3');
+  }
+  if(info&&hover>=0){
+    const d=info.p[hover];
+    tip.innerHTML='<b>Point '+(hover+1)+' of '+info.n+'</b><br><i>Time</i>'+fmt(d.t)+' s<br><i>Lon</i>'+d.lon.toFixed(8)+'\u00b0<br><i>Lat</i>'+d.lat.toFixed(8)+'\u00b0<br><i>Alt</i>'+fmt(d.alt)+' ft<br><i>Speed</i>'+fmt(S(info.sp[hover]))+' '+UL()+' <span style="color:#8b9bb0">(per interval)</span><br><i>Climb</i>'+fmt(S(info.vz[hover]))+' '+UL()+'<br><i>Radius</i>'+fmt(info.rad[hover])+' ft<br><i>Spin</i>'+fmt(S(Math.abs(info.vt[hover])))+' '+UL()+'<br><i>Radial</i>'+fmt(S(Math.abs(info.vr[hover])))+' '+UL()+(info.vr[hover]<0?' inward':' outward');
+    tip.style.display='block';tip.style.left=Math.min(mx+16,W-PW-260)+'px';tip.style.top=Math.min(my+16,H-270)+'px';
+  }else tip.style.display='none';
+  chart();
+  requestAnimationFrame(draw);
+}
+const sx=v=>{exag=Math.max(.2,Math.min(30,v));$('ex').value=exag;$('xv').textContent=exag.toFixed(1)+'\u00d7'};
+$('ex').oninput=e=>sx(+e.target.value);
+$('cm').onchange=legend;
+$('tbl').onmouseover=e=>{const r=e.target.closest('tr');rowHi=r&&r.dataset.i?+r.dataset.i:-1};
+$('tbl').onmouseleave=()=>{rowHi=-1};
+$('su').onchange=()=>{if(info)panel()};
+$('rv').onclick=()=>{yaw=.8;pitch=.45;zoom=1};
+cv.addEventListener('mousedown',e=>{drag=true;lx=e.clientX;ly=e.clientY;cv.style.cursor='grabbing'});
+addEventListener('mouseup',()=>{drag=false;cv.style.cursor='grab'});
+addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY;if(!drag)return;yaw-=(e.clientX-lx)*.005;pitch=Math.max(-.3,Math.min(1.5,pitch+(e.clientY-ly)*.005));lx=e.clientX;ly=e.clientY});
+cv.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(.25,Math.min(6,zoom*Math.exp(-e.deltaY*.001)))},{passive:false});
+addEventListener('keydown',e=>{if(e.key==='ArrowUp'){sx(exag*1.1);e.preventDefault()}if(e.key==='ArrowDown'){sx(exag/1.1);e.preventDefault()}});
+draw();
+</script>
